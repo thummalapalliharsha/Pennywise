@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:fake_cloud_firestore/fake_cloud_firestore.dart';
 import 'package:excel/excel.dart';
 import 'package:flutter/material.dart';
@@ -319,6 +321,136 @@ void main() {
         Expense(
           id: expenseId,
           title: 'Coffee and snack',
+  testWidgets('dashboard keeps its Firestore stream across local rebuilds', (
+    tester,
+  ) async {
+    final repository = _ObservedExpenseRepository(FakeFirebaseFirestore());
+    await tester.pumpWidget(
+      MaterialApp(
+        home: ExpenseDashboard(repository: repository, userId: 'test-user'),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(repository.watchCount, 1);
+
+    await tester.tap(find.byTooltip('Hide Available Balance'));
+    await tester.pumpAndSettle();
+
+    expect(repository.watchCount, 1);
+  });
+
+  testWidgets('dashboard retry creates a fresh Firestore subscription', (
+    tester,
+  ) async {
+    final repository = _ObservedExpenseRepository(FakeFirebaseFirestore())
+      ..failFirstWatch = true;
+    await tester.pumpWidget(
+      MaterialApp(
+        home: ExpenseDashboard(repository: repository, userId: 'test-user'),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('Could not load your finances.'), findsOneWidget);
+    expect(repository.watchCount, 1);
+
+    await tester.tap(find.text('Try again'));
+    await tester.pumpAndSettle();
+
+    expect(repository.watchCount, 2);
+    expect(find.text('Available Balance'), findsOneWidget);
+  });
+
+  testWidgets('invalid finance amounts and titles are rejected before writes', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(800, 1200);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final firestore = FakeFirebaseFirestore();
+    final repository = FirestoreExpenseRepository(firestore: firestore);
+    await tester.pumpWidget(
+      MaterialApp(
+        home: ExpenseDashboard(repository: repository, userId: 'test-user'),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Log spending'));
+    await tester.pumpAndSettle();
+    await tester.enterText(
+      find.widgetWithText(TextField, 'What did you spend on?'),
+      'Test expense',
+    );
+
+    for (final amount in ['NaN', 'Infinity', '1000000001']) {
+      await tester.enterText(find.widgetWithText(TextField, 'Amount'), amount);
+      await tester.ensureVisible(find.text('Save expense'));
+      await tester.tap(find.text('Save expense'));
+      await tester.pumpAndSettle();
+      expect(find.textContaining('valid amount'), findsOneWidget);
+    }
+
+    await tester.enterText(
+      find.widgetWithText(TextField, 'What did you spend on?'),
+      List.filled(121, 'x').join(),
+    );
+    await tester.enterText(find.widgetWithText(TextField, 'Amount'), '100');
+    await tester.ensureVisible(find.text('Save expense'));
+    await tester.tap(find.text('Save expense'));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('up to 120 characters'), findsOneWidget);
+
+    final expenses = await firestore
+        .collection('users')
+        .doc('test-user')
+        .collection('expenses')
+        .get();
+    expect(expenses.docs, isEmpty);
+  });
+
+  testWidgets('save action stays disabled until expense write completes', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(800, 1200);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final firestore = FakeFirebaseFirestore();
+    final repository = _ObservedExpenseRepository(firestore)
+      ..expenseWriteGate = Completer<void>();
+    await tester.pumpWidget(
+      MaterialApp(
+        home: ExpenseDashboard(repository: repository, userId: 'test-user'),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Log spending'));
+    await tester.pumpAndSettle();
+    await tester.enterText(
+      find.widgetWithText(TextField, 'What did you spend on?'),
+      'One expense',
+    );
+    await tester.enterText(find.widgetWithText(TextField, 'Amount'), '25');
+    await tester.ensureVisible(find.text('Save expense'));
+    await tester.tap(find.text('Save expense'));
+    await tester.pump();
+
+    expect(repository.expenseAddCount, 1);
+    expect(
+      tester.widgetList<FilledButton>(find.byType(FilledButton)).last.onPressed,
+      isNull,
+    );
+
+    repository.expenseWriteGate!.complete();
+    await tester.pumpAndSettle();
+    final expenses = await firestore
+        .collection('users')
+        .doc('test-user')
+        .collection('expenses')
+        .get();
+    expect(expenses.docs, hasLength(1));
+  });
+
           category: 'Food',
           amount: 180,
           date: expense.date,
@@ -593,4 +725,67 @@ void main() {
       isTrue,
     );
   });
+}
+
+  test(
+    'monthly comparison handles January rollover and empty prior months',
+    () {
+      final januaryExpense = Expense(
+        id: 'january',
+        title: 'January purchase',
+        category: 'Food',
+        amount: 120,
+        date: DateTime(2027, 1, 3),
+      );
+      final decemberExpense = Expense(
+        id: 'december',
+        title: 'December purchase',
+        category: 'Food',
+        amount: 80,
+        date: DateTime(2026, 12, 31),
+      );
+
+      final comparison = compareExpenseMonths([
+        januaryExpense,
+        decemberExpense,
+      ], DateTime(2027, 1));
+      expect(comparison.currentTotal, 120);
+      expect(comparison.previousMonth, DateTime(2026, 12));
+      expect(comparison.previousTotal, 80);
+      expect(comparison.percentageChange, 50);
+
+      final noPriorMonth = compareExpenseMonths([
+        januaryExpense,
+      ], DateTime(2027, 1));
+      expect(noPriorMonth.previousTotal, 0);
+      expect(noPriorMonth.percentageChange, isNull);
+    },
+  );
+}
+
+class _ObservedExpenseRepository extends FirestoreExpenseRepository {
+  _ObservedExpenseRepository(FakeFirebaseFirestore firestore)
+    : super(firestore: firestore);
+
+  int watchCount = 0;
+  int expenseAddCount = 0;
+  Completer<void>? expenseWriteGate;
+  bool failFirstWatch = false;
+
+  @override
+  Stream<FinanceOverview> watchFinance(String userId, DateTime month) {
+    watchCount++;
+    if (failFirstWatch && watchCount == 1) {
+      return Stream<FinanceOverview>.error(StateError('offline'));
+    }
+    return super.watchFinance(userId, month);
+  }
+
+  @override
+  Future<String> addExpense(String userId, Expense expense) async {
+    expenseAddCount++;
+    final gate = expenseWriteGate;
+    if (gate != null) await gate.future;
+    return super.addExpense(userId, expense);
+  }
 }

@@ -223,9 +223,30 @@ class _ExpenseDashboardState extends State<ExpenseDashboard> {
   final _goalTargetController = TextEditingController();
   final _goalSavedController = TextEditingController();
   bool _amountsVisible = true;
+  Stream<FinanceOverview>? _financeStream;
+  String? _financeStreamUserId;
+  DateTime? _financeStreamMonth;
 
   String? get _userId =>
       widget.userId ?? FirebaseAuth.instance.currentUser?.uid;
+
+  Stream<FinanceOverview> _watchFinance(String userId, DateTime month) {
+    final normalizedMonth = DateTime(month.year, month.month);
+    if (_financeStream == null ||
+        _financeStreamUserId != userId ||
+        _financeStreamMonth != normalizedMonth) {
+      _financeStream = _repository.watchFinance(userId, normalizedMonth);
+      _financeStreamUserId = userId;
+      _financeStreamMonth = normalizedMonth;
+    }
+    return _financeStream!;
+  }
+
+  bool _isValidTitle(String title) =>
+      title.isNotEmpty && title.runes.length <= 120;
+
+  bool _isValidAmount(double? amount) =>
+      amount != null && amount.isFinite && amount > 0 && amount <= 1000000000;
 
   @override
   void dispose() {
@@ -268,7 +289,6 @@ class _ExpenseDashboardState extends State<ExpenseDashboard> {
       backgroundColor: Colors.transparent,
       builder: (sheetContext) => StatefulBuilder(
         builder: (context, setSheetState) => _editorSheet(
-          context,
           title: existing == null ? 'Add an expense' : 'Edit expense',
           fields: [
             TextField(
@@ -319,8 +339,13 @@ class _ExpenseDashboardState extends State<ExpenseDashboard> {
           onSave: () async {
             final title = _titleController.text.trim();
             final amount = double.tryParse(_amountController.text);
-            if (title.isEmpty || amount == null || amount <= 0) {
-              _showMessage('Enter a description and valid amount.');
+            if (!_isValidTitle(title) ||
+                amount == null ||
+                !_isValidAmount(amount)) {
+              _showMessage(
+                'Enter a description of up to 120 characters and a valid '
+                'amount up to ₹1,000,000,000.',
+              );
               return;
             }
             final userId = _userId;
@@ -370,7 +395,6 @@ class _ExpenseDashboardState extends State<ExpenseDashboard> {
       backgroundColor: Colors.transparent,
       builder: (sheetContext) => StatefulBuilder(
         builder: (context, setSheetState) => _editorSheet(
-          context,
           title: existing == null ? 'Money In' : 'Edit Money In',
           fields: [
             TextField(
@@ -395,8 +419,13 @@ class _ExpenseDashboardState extends State<ExpenseDashboard> {
           onSave: () async {
             final source = _titleController.text.trim();
             final amount = double.tryParse(_amountController.text);
-            if (source.isEmpty || amount == null || amount <= 0) {
-              _showMessage('Enter who sent the money and a valid amount.');
+            if (!_isValidTitle(source) ||
+                amount == null ||
+                !_isValidAmount(amount)) {
+              _showMessage(
+                'Enter a source of up to 120 characters and a valid amount '
+                'up to ₹1,000,000,000.',
+              );
               return;
             }
             final userId = _userId;
@@ -438,15 +467,14 @@ class _ExpenseDashboardState extends State<ExpenseDashboard> {
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
       builder: (sheetContext) => _editorSheet(
-        sheetContext,
         title: 'Set monthly budget',
         subtitle: 'Choose a spending limit for this month.',
         fields: [_amountField(label: 'Monthly limit')],
         actionLabel: 'Save budget',
         onSave: () async {
           final amount = double.tryParse(_amountController.text);
-          if (amount == null || amount <= 0) {
-            _showMessage('Enter a valid budget amount.');
+          if (amount == null || !_isValidAmount(amount)) {
+            _showMessage('Enter a valid budget up to ₹1,000,000,000.');
             return;
           }
           final userId = _userId;
@@ -483,7 +511,6 @@ class _ExpenseDashboardState extends State<ExpenseDashboard> {
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
       builder: (sheetContext) => _editorSheet(
-        sheetContext,
         title: existing == null
             ? 'Create a savings goal'
             : 'Update savings goal',
@@ -520,13 +547,16 @@ class _ExpenseDashboardState extends State<ExpenseDashboard> {
           final title = _goalTitleController.text.trim();
           final target = double.tryParse(_goalTargetController.text);
           final saved = double.tryParse(_goalSavedController.text);
-          if (title.isEmpty ||
+          if (!_isValidTitle(title) ||
               target == null ||
-              target <= 0 ||
+              !_isValidAmount(target) ||
               saved == null ||
               saved < 0 ||
               saved > target) {
-            _showMessage('Enter a valid goal and saved amount.');
+            _showMessage(
+              'Enter a goal title up to 120 characters, a valid target up to '
+              '₹1,000,000,000, and a valid saved amount.',
+            );
             return;
           }
           final userId = _userId;
@@ -554,62 +584,26 @@ class _ExpenseDashboardState extends State<ExpenseDashboard> {
             );
           } catch (error) {
             _showMessage('Could not save goal: $error');
+              !saved.isFinite ||
           }
         },
       ),
     );
   }
 
-  Widget _editorSheet(
-    BuildContext context, {
+  Widget _editorSheet({
     required String title,
     String? subtitle,
     required List<Widget> fields,
     required String actionLabel,
     required Future<void> Function() onSave,
-  }) {
-    return Padding(
-      padding: EdgeInsets.only(bottom: MediaQuery.viewInsetsOf(context).bottom),
-      child: Container(
-        padding: const EdgeInsets.fromLTRB(24, 14, 24, 28),
-        decoration: BoxDecoration(
-          color: PennywisePalette.of(context).surface,
-          borderRadius: BorderRadius.vertical(top: Radius.circular(30)),
-        ),
-        child: SingleChildScrollView(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              Center(
-                child: Container(
-                  width: 42,
-                  height: 4,
-                  decoration: BoxDecoration(
-                    color: PennywisePalette.of(context).line,
-                    borderRadius: BorderRadius.circular(4),
-                  ),
-                ),
-              ),
-              const SizedBox(height: 22),
-              Text(title, style: Theme.of(context).textTheme.titleLarge),
-              if (subtitle != null) ...[
-                const SizedBox(height: 4),
-                Text(
-                  subtitle,
-                  style: TextStyle(color: PennywisePalette.of(context).muted),
-                ),
-              ],
-              const SizedBox(height: 18),
-              ...fields,
-              const SizedBox(height: 18),
-              FilledButton(onPressed: onSave, child: Text(actionLabel)),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
+  }) => _EditorSheet(
+    title: title,
+    subtitle: subtitle,
+    fields: fields,
+    actionLabel: actionLabel,
+    onSave: onSave,
+  );
 
   Widget _amountField({String label = 'Amount'}) => TextField(
     controller: _amountController,
@@ -1002,7 +996,7 @@ class _ExpenseDashboardState extends State<ExpenseDashboard> {
 
     final now = DateTime.now();
     return StreamBuilder<FinanceOverview>(
-      stream: _repository.watchFinance(userId, DateTime(now.year, now.month)),
+      stream: _watchFinance(userId, DateTime(now.year, now.month)),
       builder: (context, snapshot) {
         if (snapshot.hasError) {
           return Scaffold(
@@ -1028,7 +1022,7 @@ class _ExpenseDashboardState extends State<ExpenseDashboard> {
                     ),
                     const SizedBox(height: 12),
                     OutlinedButton.icon(
-                      onPressed: () => setState(() {}),
+                      onPressed: () => setState(() => _financeStream = null),
                       icon: Icon(Icons.refresh_rounded),
                       label: const Text('Try again'),
                     ),
@@ -2307,6 +2301,91 @@ class _TransactionHistoryScreenState extends State<TransactionHistoryScreen> {
       };
       final matchesSearch =
           query.isEmpty || details.toLowerCase().contains(query);
+class _EditorSheet extends StatefulWidget {
+  const _EditorSheet({
+    required this.title,
+    required this.fields,
+    required this.actionLabel,
+    required this.onSave,
+    this.subtitle,
+  });
+
+  final String title;
+  final String? subtitle;
+  final List<Widget> fields;
+  final String actionLabel;
+  final Future<void> Function() onSave;
+
+  @override
+  State<_EditorSheet> createState() => _EditorSheetState();
+}
+
+class _EditorSheetState extends State<_EditorSheet> {
+  bool _isSaving = false;
+
+  Future<void> _save() async {
+    if (_isSaving) return;
+    setState(() => _isSaving = true);
+    try {
+      await widget.onSave();
+    } finally {
+      if (mounted) setState(() => _isSaving = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) => Padding(
+    padding: EdgeInsets.only(bottom: MediaQuery.viewInsetsOf(context).bottom),
+    child: Container(
+      padding: const EdgeInsets.fromLTRB(24, 14, 24, 28),
+      decoration: BoxDecoration(
+        color: PennywisePalette.of(context).surface,
+        borderRadius: BorderRadius.vertical(top: Radius.circular(30)),
+      ),
+      child: SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Center(
+              child: Container(
+                width: 42,
+                height: 4,
+                decoration: BoxDecoration(
+                  color: PennywisePalette.of(context).line,
+                  borderRadius: BorderRadius.circular(4),
+                ),
+              ),
+            ),
+            const SizedBox(height: 22),
+            Text(widget.title, style: Theme.of(context).textTheme.titleLarge),
+            if (widget.subtitle != null) ...[
+              const SizedBox(height: 4),
+              Text(
+                widget.subtitle!,
+                style: TextStyle(color: PennywisePalette.of(context).muted),
+              ),
+            ],
+            const SizedBox(height: 18),
+            ...widget.fields,
+            const SizedBox(height: 18),
+            FilledButton(
+              onPressed: _isSaving ? null : _save,
+              child: _isSaving
+                  ? const SizedBox(
+                      width: 20,
+                      height: 20,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : Text(widget.actionLabel),
+            ),
+          ],
+        ),
+      ),
+    ),
+  );
+}
+
       final separator = _selectedCategory.indexOf(' · ');
       final matchesCategory =
           _selectedCategory == 'All categories' ||
