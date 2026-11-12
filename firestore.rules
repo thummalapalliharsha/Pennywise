@@ -1,0 +1,128 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function isOwner(userId) {
+      return request.auth != null && request.auth.uid == userId;
+    }
+
+    function validExpense(data) {
+      return data.keys().hasAll(['title', 'category', 'amount', 'date'])
+        && data.keys().hasOnly([
+          'title', 'category', 'amount', 'date', 'paymentMethod',
+          'transportMode', 'subcategory', 'recurringScheduleId',
+          'isRecurringGenerated'
+        ])
+        && data.title is string
+        && data.title.size() > 0
+        && data.title.size() <= 120
+        && data.category in [
+          'Food', 'PG/Rent', 'Transport', 'Shopping',
+          'Entertainment/Movies', 'Bills & Recharge', 'Bills',
+          'Personal Care', 'Health', 'Education', 'Social & Outings',
+          'Travel', 'Others'
+        ]
+        && data.amount is number
+        && data.amount > 0
+        && data.amount <= 1000000000
+        && data.date is timestamp
+        && (!data.keys().hasAny(['paymentMethod'])
+          || data.paymentMethod in ['UPI', 'Cash', 'Card', 'Other'])
+        && (!data.keys().hasAny(['transportMode'])
+          || (data.category == 'Transport'
+            && data.transportMode in ['Bus', 'Metro', 'Auto', 'Cab', 'Bike']))
+        && (!data.keys().hasAny(['subcategory'])
+          || (data.category == 'Shopping'
+            && data.subcategory in [
+              'General Shopping', 'Clothes & Footwear', 'Electronics',
+              'Accessories', 'Household Items'
+            ]))
+        && (!data.keys().hasAny(['recurringScheduleId'])
+          || (data.recurringScheduleId is string
+            && data.recurringScheduleId.size() > 0))
+        && (!data.keys().hasAny(['isRecurringGenerated'])
+          || data.isRecurringGenerated is bool);
+    }
+
+    function validMoneyReceived(data) {
+      return data.keys().hasAll([
+          'source', 'amount', 'date', 'paymentMethod'
+        ])
+        && data.keys().hasOnly([
+          'source', 'amount', 'date', 'paymentMethod'
+        ])
+        && data.source is string
+        && data.source.size() > 0
+        && data.source.size() <= 120
+        && data.amount is number
+        && data.amount > 0
+        && data.amount <= 1000000000
+        && data.date is timestamp
+        && data.paymentMethod in ['UPI', 'Cash', 'Card', 'Other'];
+    }
+
+    function validBudget(data) {
+      return data.keys().hasAll(['amount', 'updatedAt'])
+        && data.keys().hasOnly(['amount', 'updatedAt'])
+        && data.amount is number
+        && data.amount > 0
+        && data.amount <= 1000000000
+        && data.updatedAt is timestamp;
+    }
+
+    function validSavingsGoal(data) {
+      return data.keys().hasAll([
+          'title', 'targetAmount', 'savedAmount', 'createdAt'
+        ])
+        && data.keys().hasOnly([
+          'title', 'targetAmount', 'savedAmount', 'createdAt'
+        ])
+        && data.title is string
+        && data.title.size() > 0
+        && data.title.size() <= 120
+        && data.targetAmount is number
+        && data.targetAmount > 0
+        && data.targetAmount <= 1000000000
+        && data.savedAmount is number
+        && data.savedAmount >= 0
+        && data.savedAmount <= data.targetAmount
+        && data.createdAt is timestamp;
+    }
+
+    match /users/{userId}/expenses/{expenseId} {
+      allow read: if isOwner(userId);
+      allow create: if isOwner(userId)
+        && validExpense(request.resource.data);
+      allow update: if isOwner(userId)
+        && validExpense(request.resource.data);
+      allow delete: if isOwner(userId);
+    }
+
+    match /users/{userId}/moneyReceived/{entryId} {
+      allow read: if isOwner(userId);
+      allow create: if isOwner(userId)
+        && validMoneyReceived(request.resource.data);
+      allow update: if isOwner(userId)
+        && validMoneyReceived(request.resource.data);
+      allow delete: if isOwner(userId);
+    }
+
+    match /users/{userId}/monthlyBudgets/{monthId} {
+      allow read: if isOwner(userId);
+      allow create: if isOwner(userId)
+        && validBudget(request.resource.data);
+      allow update: if isOwner(userId)
+        && validBudget(request.resource.data);
+      allow delete: if isOwner(userId);
+    }
+
+    match /users/{userId}/savingsGoals/{goalId} {
+      allow read: if isOwner(userId);
+      allow create: if isOwner(userId)
+        && validSavingsGoal(request.resource.data);
+      allow update: if isOwner(userId)
+        && validSavingsGoal(request.resource.data);
+      allow delete: if isOwner(userId);
+    }
+  }
+}

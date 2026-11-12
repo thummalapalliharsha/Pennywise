@@ -1,0 +1,85 @@
+# Flutter and Dart generated files
+.dart_tool/
+.flutter-plugins
+.flutter-plugins-dependencies
+.packages
+.pub/
+.pub-cache/
+**/doc/api/
+**/build/
+/coverage/
+/package-lock.json
+
+# Keep pubspec.lock committed for this Flutter application.
+!pubspec.lock
+
+# Firebase client configuration generated locally by FlutterFire.
+**/firebase_options.dart*
+**/google-services.json*
+**/GoogleService-Info.plist*
+
+# Firebase/admin credentials and environment files
+**/*service-account*.json
+**/*serviceAccount*.json
+**/*service_account*.json
+**/*firebase-adminsdk*.json
+**/*[Cc]redential*.json
+**/.env
+**/.env.*
+!**/.env.example
+!**/.env.*.example
+
+# Signing keys and local signing configuration
+**/key.properties
+**/local.properties
+**/secrets.properties
+*.jks
+*.keystore
+*.p12
+*.pfx
+*.pem
+*.p8
+*.key
+*.mobileprovision
+*.provisionprofile
+
+# Android/Gradle local state and build outputs
+**/.gradle/
+**/.kotlin/
+**/.cxx/
+**/captures/
+/android/app/debug/
+/android/app/profile/
+/android/app/release/
+*.apk
+*.aab
+*.ipa
+
+# iOS/macOS generated configuration and artifacts
+/ios/Flutter/Generated.xcconfig
+/ios/Flutter/flutter_export_environment.sh
+/ios/Flutter/ephemeral/
+/macos/Flutter/GeneratedPluginRegistrant.swift
+/macos/Flutter/ephemeral/
+*.dSYM.zip
+
+# IDE and machine-specific files
+**/.idea/
+**/.vscode/
+*.iml
+*.ipr
+*.iws
+.DS_Store
+Thumbs.db
+
+# Logs and temporary files
+*.log
+*.tmp
+*.temp
+*.swp
+*.swo
+*.bak
+*~
+app.*.symbols
+app.*.map.json
+.widget_preview/
