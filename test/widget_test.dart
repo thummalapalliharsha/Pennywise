@@ -38,7 +38,9 @@ void main() {
   testWidgets('login screen switches to phone verification mode', (
     tester,
   ) async {
-    await tester.pumpWidget(const MaterialApp(home: LoginScreen()));
+    await tester.pumpWidget(
+      MaterialApp(home: LoginScreen(authService: _FakeAuthService())),
+    );
 
     expect(find.text('Personal Expense Tracker'), findsOneWidget);
     expect(find.text('Sign in to your account'), findsOneWidget);
@@ -51,6 +53,114 @@ void main() {
     expect(find.text('Continue with phone'), findsOneWidget);
     expect(find.byType(TextFormField), findsOneWidget);
     expect(find.text('Send SMS code'), findsOneWidget);
+  });
+
+  testWidgets(
+    'login screen delegates email, Google, and phone auth to service',
+    (tester) async {
+      final service = _FakeAuthService();
+      await tester.pumpWidget(
+        MaterialApp(home: LoginScreen(authService: service)),
+      );
+
+      await tester.enterText(
+        find.widgetWithText(TextFormField, 'Email'),
+        'person@example.com',
+      );
+      await tester.enterText(
+        find.widgetWithText(TextFormField, 'Password'),
+        'safe-pass',
+      );
+      await tester.tap(find.text('Sign in').first);
+      await tester.pumpAndSettle();
+      expect(service.lastEmailSignIn, ('person@example.com', 'safe-pass'));
+
+      await tester.ensureVisible(find.text('Forgot password?'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Forgot password?'));
+      await tester.pumpAndSettle();
+      expect(service.lastPasswordReset, 'person@example.com');
+      expect(find.text('Password reset email sent.'), findsOneWidget);
+
+      await tester.ensureVisible(find.text('New here? Create an account'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('New here? Create an account'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Create account').last);
+      await tester.pumpAndSettle();
+      expect(service.lastAccountCreation, ('person@example.com', 'safe-pass'));
+
+      await tester.ensureVisible(find.text('Continue with Google'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Continue with Google'));
+      await tester.pumpAndSettle();
+      expect(service.googleSignInCount, 1);
+
+      await tester.ensureVisible(find.text('Sign in with phone instead'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Sign in with phone instead'));
+      await tester.pumpAndSettle();
+      await tester.enterText(
+        find.widgetWithText(TextFormField, 'Phone number'),
+        '+15551234567',
+      );
+      await tester.tap(find.text('Send SMS code'));
+      await tester.pumpAndSettle();
+      expect(service.lastPhoneNumber, '+15551234567');
+      expect(find.text('Verify code'), findsOneWidget);
+
+      await tester.enterText(
+        find.widgetWithText(TextFormField, 'SMS verification code'),
+        '123456',
+      );
+      await tester.tap(find.text('Verify code'));
+      await tester.pumpAndSettle();
+      expect(service.lastPhoneVerification, ('verification-id', '123456'));
+    },
+  );
+
+  testWidgets('AuthGate uses the injected authentication state stream', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        home: AuthGate(
+          authService: _FakeAuthService(isSignedIn: true),
+          signedInChild: const Text('Signed-in content'),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('Signed-in content'), findsOneWidget);
+  });
+
+  testWidgets('login screen displays service authentication failures', (
+    tester,
+  ) async {
+    final service = _FakeAuthService()
+      ..signInError = const AuthServiceException('operation-not-allowed', null);
+    await tester.pumpWidget(
+      MaterialApp(home: LoginScreen(authService: service)),
+    );
+    await tester.enterText(
+      find.widgetWithText(TextFormField, 'Email'),
+      'person@example.com',
+    );
+    await tester.enterText(
+      find.widgetWithText(TextFormField, 'Password'),
+      'safe-pass',
+    );
+
+    await tester.tap(find.text('Sign in').first);
+    await tester.pumpAndSettle();
+
+    expect(
+      find.text(
+        'This sign-in method is not enabled in Firebase Authentication.',
+      ),
+      findsOneWidget,
+    );
   });
 
   testWidgets('tracks received money, expenses, budget, and savings goals', (
@@ -211,116 +321,6 @@ void main() {
     expect(find.text('Dinner'), findsNothing);
   });
 
-  testWidgets('shows five latest dashboard transactions and full history', (
-    tester,
-  ) async {
-    final firestore = FakeFirebaseFirestore();
-    final now = DateTime.now();
-    final expenses = firestore
-        .collection('users')
-        .doc('test-user')
-        .collection('expenses');
-    for (var index = 0; index < 6; index++) {
-      await expenses.doc('expense-$index').set({
-        'title': 'Expense $index',
-        'category': 'Food',
-        'amount': 10 + index,
-        'date': now.subtract(Duration(days: 5 - index)),
-      });
-    }
-
-    await tester.pumpWidget(
-      MaterialApp(
-        home: ExpenseDashboard(
-          repository: FirestoreExpenseRepository(firestore: firestore),
-          userId: 'test-user',
-        ),
-      ),
-    );
-    await tester.pumpAndSettle();
-
-    for (var index = 1; index < 6; index++) {
-      expect(find.text('Expense $index'), findsOneWidget);
-    }
-    expect(find.text('Expense 0'), findsNothing);
-
-    await tester.ensureVisible(find.text('View all'));
-    await tester.tap(find.text('View all'));
-    await tester.pumpAndSettle();
-    expect(find.text('Money Activity'), findsOneWidget);
-    expect(find.text('Today'), findsWidgets);
-    expect(find.text('Yesterday'), findsWidgets);
-    expect(find.text('Earlier'), findsWidgets);
-
-    await tester.enterText(find.byType(TextField).first, 'Expense 0');
-    await tester.pumpAndSettle();
-    expect(find.text('Expense 0'), findsWidgets);
-    expect(find.text('Expense 5'), findsNothing);
-    await tester.tap(find.byTooltip('Clear search'));
-    await tester.pumpAndSettle();
-
-    await tester.tap(find.byType(DropdownButtonFormField<String>));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('Food').last);
-    await tester.pumpAndSettle();
-    expect(find.text('Expense 5'), findsOneWidget);
-
-    await tester.tap(find.byTooltip('Transaction actions').first);
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('Edit'));
-    await tester.pumpAndSettle();
-    await tester.enterText(
-      find.widgetWithText(TextField, 'What did you spend on?'),
-      'Edited purchase',
-    );
-    await tester.ensureVisible(find.text('Save changes'));
-    await tester.tap(find.text('Save changes'));
-    await tester.pumpAndSettle();
-    expect(find.text('Edited purchase'), findsOneWidget);
-
-    await tester.ensureVisible(find.text('Edited purchase'));
-    await tester.tap(find.byTooltip('Expense actions').first);
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('Delete'));
-    await tester.pumpAndSettle();
-    await tester.tap(find.widgetWithText(FilledButton, 'Delete'));
-    await tester.pumpAndSettle();
-    expect(find.text('Edited purchase'), findsNothing);
-  });
-
-  test(
-    'Firestore repository saves records under the requested user UID',
-    () async {
-      final firestore = FakeFirebaseFirestore();
-      final repository = FirestoreExpenseRepository(firestore: firestore);
-      await firestore
-          .collection('users')
-          .doc('alice')
-          .collection('expenses')
-          .doc('legacy')
-          .set({
-            'title': 'Older expense',
-            'category': 'Food',
-            'amount': 75,
-            'date': DateTime.utc(2026, 11, 10),
-            'recurringScheduleId': 'old-schedule',
-            'isRecurringGenerated': true,
-          });
-      final expense = Expense(
-        id: '',
-        title: 'Coffee',
-        category: 'Food',
-        amount: 125,
-        date: DateTime.utc(2026, 11, 11),
-        paymentMethod: 'UPI',
-      );
-
-      final expenseId = await repository.addExpense('alice', expense);
-      await repository.updateExpense(
-        'alice',
-        Expense(
-          id: expenseId,
-          title: 'Coffee and snack',
   testWidgets('dashboard keeps its Firestore stream across local rebuilds', (
     tester,
   ) async {
@@ -451,6 +451,185 @@ void main() {
     expect(expenses.docs, hasLength(1));
   });
 
+  testWidgets('transaction retries reuse IDs after an ambiguous timeout', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(800, 1200);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final firestore = FakeFirebaseFirestore();
+    final repository = _CommitThenTimeoutRepository(firestore);
+    await tester.pumpWidget(
+      MaterialApp(
+        home: ExpenseDashboard(repository: repository, userId: 'test-user'),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('Log spending'));
+    await tester.pumpAndSettle();
+    await tester.enterText(
+      find.widgetWithText(TextField, 'What did you spend on?'),
+      'Retry expense',
+    );
+    await tester.enterText(find.widgetWithText(TextField, 'Amount'), '35');
+    await tester.ensureVisible(find.text('Save expense'));
+    await tester.tap(find.text('Save expense'));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('Could not save expense'), findsOneWidget);
+    await tester.tap(find.text('Save expense'));
+    await tester.pumpAndSettle();
+    expect(repository.expenseIds, hasLength(2));
+    expect(repository.expenseIds[0], repository.expenseIds[1]);
+    expect(
+      (await firestore
+              .collection('users')
+              .doc('test-user')
+              .collection('expenses')
+              .get())
+          .docs,
+      hasLength(1),
+    );
+
+    await tester.pump(const Duration(seconds: 5));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Add Money In'));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.widgetWithText(TextField, 'From'), 'Parents');
+    await tester.enterText(find.widgetWithText(TextField, 'Amount'), '500');
+    await tester.ensureVisible(find.text('Save Money In'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Save Money In'));
+    await tester.pumpAndSettle();
+    expect(repository.moneyReceivedIds, hasLength(1));
+    expect(find.text('Save Money In'), findsOneWidget);
+    expect(find.textContaining('Could not save transfer'), findsOneWidget);
+    await tester.tap(find.text('Save Money In'));
+    await tester.pumpAndSettle();
+    expect(repository.moneyReceivedIds, hasLength(2));
+    expect(repository.moneyReceivedIds[0], repository.moneyReceivedIds[1]);
+    expect(
+      (await firestore
+              .collection('users')
+              .doc('test-user')
+              .collection('moneyReceived')
+              .get())
+          .docs,
+      hasLength(1),
+    );
+  });
+
+  testWidgets('shows five latest dashboard transactions and full history', (
+    tester,
+  ) async {
+    final firestore = FakeFirebaseFirestore();
+    final now = DateTime.now();
+    final expenses = firestore
+        .collection('users')
+        .doc('test-user')
+        .collection('expenses');
+    for (var index = 0; index < 6; index++) {
+      await expenses.doc('expense-$index').set({
+        'title': 'Expense $index',
+        'category': 'Food',
+        'amount': 10 + index,
+        'date': now.subtract(Duration(days: 5 - index)),
+      });
+    }
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: ExpenseDashboard(
+          repository: FirestoreExpenseRepository(firestore: firestore),
+          userId: 'test-user',
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    for (var index = 1; index < 6; index++) {
+      expect(find.text('Expense $index'), findsOneWidget);
+    }
+    expect(find.text('Expense 0'), findsNothing);
+
+    await tester.ensureVisible(find.text('View all'));
+    await tester.tap(find.text('View all'));
+    await tester.pumpAndSettle();
+    expect(find.text('Money Activity'), findsOneWidget);
+    expect(find.text('Today'), findsWidgets);
+    expect(find.text('Yesterday'), findsWidgets);
+    expect(find.text('Earlier'), findsWidgets);
+
+    await tester.enterText(find.byType(TextField).first, 'Expense 0');
+    await tester.pumpAndSettle();
+    expect(find.text('Expense 0'), findsWidgets);
+    expect(find.text('Expense 5'), findsNothing);
+    await tester.tap(find.byTooltip('Clear search'));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byType(DropdownButtonFormField<String>));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Food').last);
+    await tester.pumpAndSettle();
+    expect(find.text('Expense 5'), findsOneWidget);
+
+    await tester.tap(find.byTooltip('Transaction actions').first);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Edit'));
+    await tester.pumpAndSettle();
+    await tester.enterText(
+      find.widgetWithText(TextField, 'What did you spend on?'),
+      'Edited purchase',
+    );
+    await tester.ensureVisible(find.text('Save changes'));
+    await tester.tap(find.text('Save changes'));
+    await tester.pumpAndSettle();
+    expect(find.text('Edited purchase'), findsOneWidget);
+
+    await tester.ensureVisible(find.text('Edited purchase'));
+    await tester.tap(find.byTooltip('Expense actions').first);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Delete'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.widgetWithText(FilledButton, 'Delete'));
+    await tester.pumpAndSettle();
+    expect(find.text('Edited purchase'), findsNothing);
+  });
+
+  test(
+    'Firestore repository saves records under the requested user UID',
+    () async {
+      final firestore = FakeFirebaseFirestore();
+      final repository = FirestoreExpenseRepository(firestore: firestore);
+      await firestore
+          .collection('users')
+          .doc('alice')
+          .collection('expenses')
+          .doc('legacy')
+          .set({
+            'title': 'Older expense',
+            'category': 'Food',
+            'amount': 75,
+            'date': DateTime.utc(2026, 11, 10),
+            'recurringScheduleId': 'old-schedule',
+            'isRecurringGenerated': true,
+          });
+      final expense = Expense(
+        id: '',
+        title: 'Coffee',
+        category: 'Food',
+        amount: 125,
+        date: DateTime.utc(2026, 11, 11),
+        paymentMethod: 'UPI',
+      );
+
+      final expenseId = await repository.addExpense('alice', expense);
+      await repository.updateExpense(
+        'alice',
+        Expense(
+          id: expenseId,
+          title: 'Coffee and snack',
           category: 'Food',
           amount: 180,
           date: expense.date,
@@ -590,7 +769,180 @@ void main() {
     );
     expect(shopping.toFirestore()['subcategory'], 'Clothes & Footwear');
     expect(shopping.icon, Icons.checkroom_rounded);
+    final investment = Expense(
+      id: 'investment',
+      title: 'Index fund',
+      category: 'Investments',
+      subcategory: 'ETFs',
+      amount: 800,
+      date: DateTime(2026, 11, 12),
+    );
+    expect(Expense.categories, contains('Investments'));
+    expect(Expense.investmentTypes, [
+      'SIP',
+      'Stocks',
+      'Mutual Funds',
+      'Gold',
+      'ETFs',
+      'Bonds',
+      'Other Investments',
+    ]);
+    expect(investment.icon, Icons.trending_up_rounded);
+    expect(investment.toFirestore()['subcategory'], 'ETFs');
+    expect(
+      Expense.fromFirestore('investment', investment.toFirestore()).subcategory,
+      'ETFs',
+    );
+    expect(
+      buildAppTheme().extension<PennywisePalette>()!.categoryColor(
+        'Investments',
+      ),
+      isNot(buildAppTheme().extension<PennywisePalette>()!.muted),
+    );
     expect(Expense.transportModes, contains('Bike'));
+  });
+
+  testWidgets('Investments can be added, edited, filtered and counted', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(800, 1200);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final repository = FirestoreExpenseRepository(
+      firestore: FakeFirebaseFirestore(),
+    );
+    await tester.pumpWidget(
+      MaterialApp(
+        home: ExpenseDashboard(repository: repository, userId: 'investor'),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Log spending'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.widgetWithText(ChoiceChip, 'Investments').last);
+    await tester.pumpAndSettle();
+
+    for (final type in Expense.investmentTypes) {
+      expect(find.text(type), findsOneWidget);
+    }
+    await tester.ensureVisible(find.widgetWithText(ChoiceChip, 'ETFs'));
+    await tester.tap(find.widgetWithText(ChoiceChip, 'ETFs'));
+    await tester.enterText(
+      find.widgetWithText(TextField, 'What did you spend on?'),
+      'Index fund',
+    );
+    await tester.enterText(find.widgetWithText(TextField, 'Amount'), '800');
+    await tester.scrollUntilVisible(
+      find.text('Save expense'),
+      200,
+      scrollable: find.byType(Scrollable).last,
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Save expense'));
+    await tester.pumpAndSettle();
+
+    expect(
+      find.text('Highest category: Investments · ₹800.00'),
+      findsOneWidget,
+    );
+    expect(find.text('₹800.00'), findsWidgets);
+    expect(find.textContaining('Investments · ETFs'), findsOneWidget);
+
+    await tester.ensureVisible(find.text('Index fund'));
+    await tester.tap(find.byTooltip('Expense actions'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Edit'));
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(find.widgetWithText(ChoiceChip, 'Bonds'));
+    await tester.tap(find.widgetWithText(ChoiceChip, 'Bonds'));
+    await tester.scrollUntilVisible(
+      find.text('Save changes'),
+      200,
+      scrollable: find.byType(Scrollable).last,
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Save changes'));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('Investments · Bonds'), findsOneWidget);
+
+    await tester.ensureVisible(find.text('View all'));
+    await tester.tap(find.text('View all'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byType(DropdownButtonFormField<String>));
+    await tester.pumpAndSettle();
+    await tester.scrollUntilVisible(
+      find.text('Investments · Bonds'),
+      250,
+      scrollable: find.byType(Scrollable).last,
+    );
+    await tester.tap(find.text('Investments · Bonds').last);
+    await tester.pumpAndSettle();
+    expect(find.text('Index fund'), findsOneWidget);
+  });
+
+  testWidgets('switching Shopping and Investments resets subcategory', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(800, 1200);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final repository = FirestoreExpenseRepository(
+      firestore: FakeFirebaseFirestore(),
+    );
+    await tester.pumpWidget(
+      MaterialApp(
+        home: ExpenseDashboard(repository: repository, userId: 'investor'),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Log spending'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.widgetWithText(ChoiceChip, 'Shopping').last);
+    await tester.pumpAndSettle();
+    await tester.tap(find.widgetWithText(ChoiceChip, 'Clothes & Footwear'));
+    await tester.tap(find.widgetWithText(ChoiceChip, 'Investments').last);
+    await tester.pumpAndSettle();
+    expect(
+      tester
+          .widget<ChoiceChip>(find.widgetWithText(ChoiceChip, 'SIP'))
+          .selected,
+      isTrue,
+    );
+    await tester.enterText(
+      find.widgetWithText(TextField, 'What did you spend on?'),
+      'SIP contribution',
+    );
+    await tester.enterText(find.widgetWithText(TextField, 'Amount'), '1000');
+    await tester.ensureVisible(find.text('Save expense'));
+    await tester.tap(find.text('Save expense'));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('Investments · SIP'), findsOneWidget);
+
+    await tester.tap(find.text('Log spending'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.widgetWithText(ChoiceChip, 'Investments').last);
+    await tester.pumpAndSettle();
+    await tester.tap(find.widgetWithText(ChoiceChip, 'Shopping').last);
+    await tester.pumpAndSettle();
+    expect(
+      tester
+          .widget<ChoiceChip>(
+            find.widgetWithText(ChoiceChip, 'General Shopping'),
+          )
+          .selected,
+      isTrue,
+    );
+    await tester.enterText(
+      find.widgetWithText(TextField, 'What did you spend on?'),
+      'General purchase',
+    );
+    await tester.enterText(find.widgetWithText(TextField, 'Amount'), '50');
+    await tester.ensureVisible(find.text('Save expense'));
+    await tester.tap(find.text('Save expense'));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('Shopping · General Shopping'), findsOneWidget);
   });
 
   testWidgets('Shopping subcategory can be added, edited, and viewed', (
@@ -682,16 +1034,25 @@ void main() {
         amount: 300,
         date: DateTime(2026, 10, 3),
       ),
+      Expense(
+        id: 'investment',
+        title: 'Index fund',
+        category: 'Investments',
+        subcategory: 'ETFs',
+        amount: 800,
+        date: DateTime(2026, 11, 12),
+      ),
     ];
     final comparison = compareExpenseMonths(expenses, DateTime(2026, 11));
-    expect(comparison.currentTotal, 1200);
+    expect(comparison.currentTotal, 2000);
     expect(comparison.previousTotal, 300);
-    expect(comparison.difference, 900);
-    expect(comparison.percentageChange, 300);
+    expect(comparison.currentCategories['Investments'], 800);
+    expect(comparison.difference, 1700);
+    expect(comparison.percentageChange, closeTo(566.67, 0.01));
 
     final csv = buildMonthlyCsv(
       month: DateTime(2026, 11),
-      expenses: [expenses.first],
+      expenses: [expenses.first, expenses.last],
       moneyReceived: [
         MoneyReceived(
           id: 'income',
@@ -704,6 +1065,9 @@ void main() {
       closingBalance: 3800,
     );
     expect(csv, contains('"Clothes & Footwear"'));
+    expect(csv, contains('"Investments"'));
+    expect(csv, contains('"ETFs"'));
+    expect(csv, contains('"₹800.00"'));
     expect(csv, contains('"Money In"'));
     expect(csv, contains('"₹5000.00"'));
     expect(csv, contains('"Shoes, new"'));
@@ -711,7 +1075,7 @@ void main() {
 
     final excelBytes = buildMonthlyExcelReport(
       month: DateTime(2026, 11),
-      expenses: [expenses.first],
+      expenses: [expenses.first, expenses.last],
       moneyReceived: const [],
       closingBalance: 3800,
     );
@@ -724,8 +1088,14 @@ void main() {
           .any((cell) => cell.value.toString().contains('Clothes & Footwear')),
       isTrue,
     );
+    expect(
+      workbook.tables['Monthly report']!.rows
+          .expand((row) => row)
+          .whereType<Data>()
+          .any((cell) => cell.value.toString().contains('Investments')),
+      isTrue,
+    );
   });
-}
 
   test(
     'monthly comparison handles January rollover and empty prior months',
@@ -787,5 +1157,96 @@ class _ObservedExpenseRepository extends FirestoreExpenseRepository {
     final gate = expenseWriteGate;
     if (gate != null) await gate.future;
     return super.addExpense(userId, expense);
+  }
+}
+
+class _CommitThenTimeoutRepository extends FirestoreExpenseRepository {
+  _CommitThenTimeoutRepository(FakeFirebaseFirestore firestore)
+    : super(firestore: firestore);
+
+  bool _failExpenseOnce = true;
+  bool _failMoneyReceivedOnce = true;
+  final List<String> expenseIds = [];
+  final List<String> moneyReceivedIds = [];
+
+  @override
+  Future<String> addExpense(String userId, Expense expense) async {
+    expenseIds.add(expense.id);
+    final id = await super.addExpense(userId, expense);
+    if (_failExpenseOnce) {
+      _failExpenseOnce = false;
+      throw StateError('simulated response timeout after commit');
+    }
+    return id;
+  }
+
+  @override
+  Future<String> addMoneyReceived(
+    String userId,
+    MoneyReceived moneyReceived,
+  ) async {
+    moneyReceivedIds.add(moneyReceived.id);
+    final id = await super.addMoneyReceived(userId, moneyReceived);
+    if (_failMoneyReceivedOnce) {
+      _failMoneyReceivedOnce = false;
+      throw StateError('simulated response timeout after commit');
+    }
+    return id;
+  }
+}
+
+class _FakeAuthService implements AuthService {
+  _FakeAuthService({this.isSignedIn = false});
+
+  final bool isSignedIn;
+
+  @override
+  Stream<bool> get signedInChanges => Stream<bool>.value(isSignedIn);
+
+  (String, String)? lastAccountCreation;
+  (String, String)? lastEmailSignIn;
+  (String, String)? lastPhoneVerification;
+  String? lastPhoneNumber;
+  String? lastPasswordReset;
+  int googleSignInCount = 0;
+  AuthServiceException? signInError;
+
+  @override
+  Future<void> createAccount(String email, String password) async {
+    lastAccountCreation = (email, password);
+  }
+
+  @override
+  Future<void> signInWithEmail(String email, String password) async {
+    lastEmailSignIn = (email, password);
+    final error = signInError;
+    if (error != null) throw error;
+  }
+
+  @override
+  Future<void> sendPasswordReset(String email) async {
+    lastPasswordReset = email;
+  }
+
+  @override
+  Future<void> signInWithGoogle() async {
+    googleSignInCount++;
+  }
+
+  @override
+  Future<void> sendPhoneCode({
+    required String phoneNumber,
+    required int? forceResendingToken,
+    required PhoneCodeSentCallback onCodeSent,
+    required PhoneAuthErrorCallback onError,
+    required void Function(String verificationId) onAutoRetrievalTimeout,
+  }) async {
+    lastPhoneNumber = phoneNumber;
+    onCodeSent('verification-id', 7);
+  }
+
+  @override
+  Future<void> verifyPhoneCode(String verificationId, String smsCode) async {
+    lastPhoneVerification = (verificationId, smsCode);
   }
 }
