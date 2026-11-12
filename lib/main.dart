@@ -277,6 +277,7 @@ class _ExpenseDashboardState extends State<ExpenseDashboard> {
     _amountController.text = existing?.amount.toString() ?? '';
     var category = existing?.displayCategory ?? 'Food';
     var subcategory = existing?.subcategory;
+    var pendingExpenseId = existing?.id;
     var transportMode = _transportModes.contains(existing?.transportMode)
         ? existing!.transportMode!
         : 'Bus';
@@ -354,8 +355,11 @@ class _ExpenseDashboardState extends State<ExpenseDashboard> {
               return;
             }
             try {
+              final expenseId =
+                  pendingExpenseId ?? _repository.newExpenseId(userId);
+              pendingExpenseId = expenseId;
               final expense = Expense(
-                id: existing?.id ?? '',
+                id: expenseId,
                 title: title,
                 category: category,
                 amount: amount,
@@ -386,6 +390,7 @@ class _ExpenseDashboardState extends State<ExpenseDashboard> {
   Future<void> _showMoneyReceivedSheet({MoneyReceived? existing}) async {
     _titleController.text = existing?.source ?? 'From parents';
     _amountController.text = existing?.amount.toString() ?? '';
+    var pendingMoneyReceivedId = existing?.id;
     var paymentMethod = _paymentMethods.contains(existing?.paymentMethod)
         ? existing!.paymentMethod
         : 'UPI';
@@ -434,8 +439,12 @@ class _ExpenseDashboardState extends State<ExpenseDashboard> {
               return;
             }
             try {
+              final moneyReceivedId =
+                  pendingMoneyReceivedId ??
+                  _repository.newMoneyReceivedId(userId);
+              pendingMoneyReceivedId = moneyReceivedId;
               final entry = MoneyReceived(
-                id: existing?.id ?? '',
+                id: moneyReceivedId,
                 source: source,
                 amount: amount,
                 date: existing?.date ?? DateTime.now(),

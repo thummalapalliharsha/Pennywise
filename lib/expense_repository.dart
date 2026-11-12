@@ -6,6 +6,10 @@ import 'expense.dart';
 abstract interface class ExpenseRepository {
   Stream<FinanceOverview> watchFinance(String userId, DateTime month);
 
+  String newExpenseId(String userId);
+
+  String newMoneyReceivedId(String userId);
+
   Future<String> addExpense(String userId, Expense expense);
 
   Future<void> updateExpense(String userId, Expense expense);
@@ -57,6 +61,12 @@ class FirestoreExpenseRepository implements ExpenseRepository {
     String userId,
     DateTime month,
   ) => _user(userId).collection('monthlyBudgets').doc(_monthId(month));
+
+  @override
+  String newExpenseId(String userId) => _expenses(userId).doc().id;
+
+  @override
+  String newMoneyReceivedId(String userId) => _income(userId).doc().id;
 
   @override
   Stream<FinanceOverview> watchFinance(String userId, DateTime month) {
@@ -112,7 +122,9 @@ class FirestoreExpenseRepository implements ExpenseRepository {
 
   @override
   Future<String> addExpense(String userId, Expense expense) async {
-    final document = await _expenses(userId).add(expense.toFirestore());
+    final document = _expenses(userId)
+        .doc(expense.id.isEmpty ? null : expense.id);
+    await document.set(expense.toFirestore());
     return document.id;
   }
 
@@ -135,7 +147,9 @@ class FirestoreExpenseRepository implements ExpenseRepository {
     String userId,
     MoneyReceived moneyReceived,
   ) async {
-    final document = await _income(userId).add(moneyReceived.toFirestore());
+    final document = _income(userId)
+        .doc(moneyReceived.id.isEmpty ? null : moneyReceived.id);
+    await document.set(moneyReceived.toFirestore());
     return document.id;
   }
 
