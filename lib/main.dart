@@ -581,6 +581,7 @@ class _ExpenseDashboardState extends State<ExpenseDashboard> {
               target == null ||
               !_isValidAmount(target) ||
               saved == null ||
+              !saved.isFinite ||
               saved < 0 ||
               saved > target) {
             _showMessage(
@@ -614,7 +615,6 @@ class _ExpenseDashboardState extends State<ExpenseDashboard> {
             );
           } catch (error) {
             _showMessage('Could not save goal: $error');
-              !saved.isFinite ||
           }
         },
       ),
@@ -2301,6 +2301,91 @@ class _ExpenseDashboardState extends State<ExpenseDashboard> {
   }
 }
 
+class _EditorSheet extends StatefulWidget {
+  const _EditorSheet({
+    required this.title,
+    required this.fields,
+    required this.actionLabel,
+    required this.onSave,
+    this.subtitle,
+  });
+
+  final String title;
+  final String? subtitle;
+  final List<Widget> fields;
+  final String actionLabel;
+  final Future<void> Function() onSave;
+
+  @override
+  State<_EditorSheet> createState() => _EditorSheetState();
+}
+
+class _EditorSheetState extends State<_EditorSheet> {
+  bool _isSaving = false;
+
+  Future<void> _save() async {
+    if (_isSaving) return;
+    setState(() => _isSaving = true);
+    try {
+      await widget.onSave();
+    } finally {
+      if (mounted) setState(() => _isSaving = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) => Padding(
+    padding: EdgeInsets.only(bottom: MediaQuery.viewInsetsOf(context).bottom),
+    child: Container(
+      padding: const EdgeInsets.fromLTRB(24, 14, 24, 28),
+      decoration: BoxDecoration(
+        color: PennywisePalette.of(context).surface,
+        borderRadius: BorderRadius.vertical(top: Radius.circular(30)),
+      ),
+      child: SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Center(
+              child: Container(
+                width: 42,
+                height: 4,
+                decoration: BoxDecoration(
+                  color: PennywisePalette.of(context).line,
+                  borderRadius: BorderRadius.circular(4),
+                ),
+              ),
+            ),
+            const SizedBox(height: 22),
+            Text(widget.title, style: Theme.of(context).textTheme.titleLarge),
+            if (widget.subtitle != null) ...[
+              const SizedBox(height: 4),
+              Text(
+                widget.subtitle!,
+                style: TextStyle(color: PennywisePalette.of(context).muted),
+              ),
+            ],
+            const SizedBox(height: 18),
+            ...widget.fields,
+            const SizedBox(height: 18),
+            FilledButton(
+              onPressed: _isSaving ? null : _save,
+              child: _isSaving
+                  ? const SizedBox(
+                      width: 20,
+                      height: 20,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : Text(widget.actionLabel),
+            ),
+          ],
+        ),
+      ),
+    ),
+  );
+}
+
 class TransactionHistoryScreen extends StatefulWidget {
   const TransactionHistoryScreen({
     required this.kind,
@@ -2391,91 +2476,6 @@ class _TransactionHistoryScreenState extends State<TransactionHistoryScreen> {
       };
       final matchesSearch =
           query.isEmpty || details.toLowerCase().contains(query);
-class _EditorSheet extends StatefulWidget {
-  const _EditorSheet({
-    required this.title,
-    required this.fields,
-    required this.actionLabel,
-    required this.onSave,
-    this.subtitle,
-  });
-
-  final String title;
-  final String? subtitle;
-  final List<Widget> fields;
-  final String actionLabel;
-  final Future<void> Function() onSave;
-
-  @override
-  State<_EditorSheet> createState() => _EditorSheetState();
-}
-
-class _EditorSheetState extends State<_EditorSheet> {
-  bool _isSaving = false;
-
-  Future<void> _save() async {
-    if (_isSaving) return;
-    setState(() => _isSaving = true);
-    try {
-      await widget.onSave();
-    } finally {
-      if (mounted) setState(() => _isSaving = false);
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) => Padding(
-    padding: EdgeInsets.only(bottom: MediaQuery.viewInsetsOf(context).bottom),
-    child: Container(
-      padding: const EdgeInsets.fromLTRB(24, 14, 24, 28),
-      decoration: BoxDecoration(
-        color: PennywisePalette.of(context).surface,
-        borderRadius: BorderRadius.vertical(top: Radius.circular(30)),
-      ),
-      child: SingleChildScrollView(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Center(
-              child: Container(
-                width: 42,
-                height: 4,
-                decoration: BoxDecoration(
-                  color: PennywisePalette.of(context).line,
-                  borderRadius: BorderRadius.circular(4),
-                ),
-              ),
-            ),
-            const SizedBox(height: 22),
-            Text(widget.title, style: Theme.of(context).textTheme.titleLarge),
-            if (widget.subtitle != null) ...[
-              const SizedBox(height: 4),
-              Text(
-                widget.subtitle!,
-                style: TextStyle(color: PennywisePalette.of(context).muted),
-              ),
-            ],
-            const SizedBox(height: 18),
-            ...widget.fields,
-            const SizedBox(height: 18),
-            FilledButton(
-              onPressed: _isSaving ? null : _save,
-              child: _isSaving
-                  ? const SizedBox(
-                      width: 20,
-                      height: 20,
-                      child: CircularProgressIndicator(strokeWidth: 2),
-                    )
-                  : Text(widget.actionLabel),
-            ),
-          ],
-        ),
-      ),
-    ),
-  );
-}
-
       final separator = _selectedCategory.indexOf(' · ');
       final matchesCategory =
           _selectedCategory == 'All categories' ||
