@@ -4,6 +4,157 @@ import 'package:google_sign_in/google_sign_in.dart';
 
 import 'app_theme.dart';
 
+typedef PhoneCodeSentCallback = void Function(
+  String verificationId,
+  int? resendToken,
+);
+typedef PhoneAuthErrorCallback = void Function(AuthServiceException error);
+
+abstract interface class AuthService {
+  Stream<bool> get signedInChanges;
+
+  Future<void> createAccount(String email, String password);
+
+  Future<void> signInWithEmail(String email, String password);
+
+  Future<void> sendPasswordReset(String email);
+
+  Future<void> signInWithGoogle();
+
+  Future<void> sendPhoneCode({
+    required String phoneNumber,
+    required int? forceResendingToken,
+    required PhoneCodeSentCallback onCodeSent,
+    required PhoneAuthErrorCallback onError,
+    required void Function(String verificationId) onAutoRetrievalTimeout,
+  });
+
+  Future<void> verifyPhoneCode(String verificationId, String smsCode);
+}
+
+class AuthServiceException implements Exception {
+  const AuthServiceException(this.code, this.message);
+
+  final String code;
+  final String? message;
+
+  @override
+  String toString() => message ?? code;
+}
+
+class FirebaseAuthService implements AuthService {
+  FirebaseAuthService({FirebaseAuth? auth, GoogleSignIn? googleSignIn})
+    : _auth = auth ?? FirebaseAuth.instance,
+      _googleSignIn = googleSignIn ?? GoogleSignIn.instance;
+
+  final FirebaseAuth _auth;
+  final GoogleSignIn _googleSignIn;
+  Future<void>? _googleSignInInitialization;
+
+  @override
+  Stream<bool> get signedInChanges =>
+      _auth.authStateChanges().map((user) => user != null);
+
+  Future<void> _run(Future<void> Function() operation) async {
+    try {
+      await operation();
+    } on FirebaseAuthException catch (error) {
+      throw AuthServiceException(error.code, error.message);
+    }
+  }
+
+  @override
+  Future<void> createAccount(String email, String password) => _run(
+    () =>
+        _auth.createUserWithEmailAndPassword(email: email, password: password),
+  );
+
+  @override
+  Future<void> signInWithEmail(String email, String password) => _run(
+    () => _auth.signInWithEmailAndPassword(email: email, password: password),
+  );
+
+  @override
+  Future<void> sendPasswordReset(String email) =>
+      _run(() => _auth.sendPasswordResetEmail(email: email));
+
+  @override
+  Future<void> signInWithGoogle() async {
+    try {
+      _googleSignInInitialization ??= _googleSignIn.initialize();
+      await _googleSignInInitialization;
+
+      if (!_googleSignIn.supportsAuthenticate()) {
+        throw const AuthServiceException(
+          'google-sign-in-unavailable',
+          'Google sign-in is not available on this platform.',
+        );
+      }
+
+      final account = await _googleSignIn.authenticate();
+      final idToken = account.authentication.idToken;
+      if (idToken == null) {
+        throw const AuthServiceException(
+          'missing-google-id-token',
+          'Google did not return an ID token. Check the Firebase and Google '
+              'OAuth configuration for this app.',
+        );
+      }
+
+      final credential = GoogleAuthProvider.credential(idToken: idToken);
+      await _auth.signInWithCredential(credential);
+    } on FirebaseAuthException catch (error) {
+      throw AuthServiceException(error.code, error.message);
+    } on GoogleSignInException catch (error) {
+      if (error.code != GoogleSignInExceptionCode.canceled) {
+        throw AuthServiceException(
+          'google-sign-in-failed',
+          error.description ?? 'Google sign-in failed.',
+        );
+      }
+    }
+  }
+
+  @override
+  Future<void> sendPhoneCode({
+    required String phoneNumber,
+    required int? forceResendingToken,
+    required PhoneCodeSentCallback onCodeSent,
+    required PhoneAuthErrorCallback onError,
+    required void Function(String verificationId) onAutoRetrievalTimeout,
+  }) async {
+    try {
+      await _auth.verifyPhoneNumber(
+        phoneNumber: phoneNumber,
+        forceResendingToken: forceResendingToken,
+        verificationCompleted: (credential) async {
+          try {
+            await _auth.signInWithCredential(credential);
+          } on FirebaseAuthException catch (error) {
+            onError(AuthServiceException(error.code, error.message));
+          }
+        },
+        verificationFailed: (error) =>
+            onError(AuthServiceException(error.code, error.message)),
+        codeSent: onCodeSent,
+        codeAutoRetrievalTimeout: onAutoRetrievalTimeout,
+      );
+    } on FirebaseAuthException catch (error) {
+      throw AuthServiceException(error.code, error.message);
+    }
+  }
+
+  @override
+  Future<void> verifyPhoneCode(String verificationId, String smsCode) =>
+      _run(() async {
+        final credential = PhoneAuthProvider.credential(
+          verificationId: verificationId,
+          smsCode: smsCode,
+        );
+        await _auth.signInWithCredential(credential);
+      });
+}
+
 class FirebaseSetupScreen extends StatelessWidget {
   const FirebaseSetupScreen({required this.details, super.key});
 
@@ -46,14 +197,16 @@ class FirebaseSetupScreen extends StatelessWidget {
 }
 
 class AuthGate extends StatelessWidget {
-  const AuthGate({required this.signedInChild, super.key});
+  AuthGate({required this.signedInChild, AuthService? authService, super.key})
+    : authService = authService ?? FirebaseAuthService();
 
   final Widget signedInChild;
+  final AuthService authService;
 
   @override
   Widget build(BuildContext context) {
-    return StreamBuilder<User?>(
-      stream: FirebaseAuth.instance.authStateChanges(),
+    return StreamBuilder<bool>(
+      stream: authService.signedInChanges,
       builder: (context, snapshot) {
         if (snapshot.hasError) {
           return FirebaseSetupScreen(details: snapshot.error.toString());
@@ -63,22 +216,25 @@ class AuthGate extends StatelessWidget {
             body: Center(child: CircularProgressIndicator()),
           );
         }
-        return snapshot.data == null ? const LoginScreen() : signedInChild;
+        return snapshot.data == true
+            ? signedInChild
+            : LoginScreen(authService: authService);
       },
     );
   }
 }
 
 class LoginScreen extends StatefulWidget {
-  const LoginScreen({super.key});
+  LoginScreen({AuthService? authService, super.key})
+    : authService = authService ?? FirebaseAuthService();
+
+  final AuthService authService;
 
   @override
   State<LoginScreen> createState() => _LoginScreenState();
 }
 
 class _LoginScreenState extends State<LoginScreen> {
-  static Future<void>? _googleSignInInitialization;
-
   final _formKey = GlobalKey<FormState>();
   final _emailController = TextEditingController();
   final _passwordController = TextEditingController();
@@ -101,7 +257,7 @@ class _LoginScreenState extends State<LoginScreen> {
     super.dispose();
   }
 
-  String _messageFor(FirebaseAuthException error) {
+  String _messageFor(AuthServiceException error) {
     switch (error.code) {
       case 'invalid-email':
         return 'Enter a valid email address.';
@@ -146,19 +302,18 @@ class _LoginScreenState extends State<LoginScreen> {
     });
 
     try {
-      final auth = FirebaseAuth.instance;
       if (_isCreatingAccount) {
-        await auth.createUserWithEmailAndPassword(
-          email: _emailController.text.trim(),
-          password: _passwordController.text,
+        await widget.authService.createAccount(
+          _emailController.text.trim(),
+          _passwordController.text,
         );
       } else {
-        await auth.signInWithEmailAndPassword(
-          email: _emailController.text.trim(),
-          password: _passwordController.text,
+        await widget.authService.signInWithEmail(
+          _emailController.text.trim(),
+          _passwordController.text,
         );
       }
-    } on FirebaseAuthException catch (error) {
+    } on AuthServiceException catch (error) {
       _setError(_messageFor(error));
     } finally {
       if (mounted) {
@@ -180,13 +335,13 @@ class _LoginScreenState extends State<LoginScreen> {
     });
 
     try {
-      await FirebaseAuth.instance.sendPasswordResetEmail(email: email);
+      await widget.authService.sendPasswordReset(email);
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Password reset email sent.')),
         );
       }
-    } on FirebaseAuthException catch (error) {
+    } on AuthServiceException catch (error) {
       _setError(_messageFor(error));
     } finally {
       if (mounted) {
@@ -202,35 +357,9 @@ class _LoginScreenState extends State<LoginScreen> {
     });
 
     try {
-      _googleSignInInitialization ??= GoogleSignIn.instance.initialize();
-      await _googleSignInInitialization;
-
-      final googleSignIn = GoogleSignIn.instance;
-      if (!googleSignIn.supportsAuthenticate()) {
-        _setError('Google sign-in is not available on this platform.');
-        return;
-      }
-
-      final account = await googleSignIn.authenticate();
-      final idToken = account.authentication.idToken;
-      if (idToken == null) {
-        _setError(
-          'Google did not return an ID token. Check the Firebase and Google '
-          'OAuth configuration for this app.',
-        );
-        return;
-      }
-
-      final credential = GoogleAuthProvider.credential(idToken: idToken);
-      await FirebaseAuth.instance.signInWithCredential(credential);
-    } on FirebaseAuthException catch (error) {
+      await widget.authService.signInWithGoogle();
+    } on AuthServiceException catch (error) {
       _setError(_messageFor(error));
-    } on GoogleSignInException catch (error) {
-      if (error.code != GoogleSignInExceptionCode.canceled) {
-        _setError(error.description ?? 'Google sign-in failed.');
-      } else if (mounted) {
-        setState(() => _isLoading = false);
-      }
     } finally {
       if (mounted) {
         setState(() => _isLoading = false);
@@ -253,20 +382,10 @@ class _LoginScreenState extends State<LoginScreen> {
     });
 
     try {
-      await FirebaseAuth.instance.verifyPhoneNumber(
+      await widget.authService.sendPhoneCode(
         phoneNumber: phoneNumber,
         forceResendingToken: _resendingToken,
-        verificationCompleted: (credential) async {
-          try {
-            await FirebaseAuth.instance.signInWithCredential(credential);
-          } on FirebaseAuthException catch (error) {
-            _setError(_messageFor(error));
-          }
-        },
-        verificationFailed: (error) {
-          _setError(_messageFor(error));
-        },
-        codeSent: (verificationId, resendToken) {
+        onCodeSent: (verificationId, resendToken) {
           if (!mounted) return;
           setState(() {
             _verificationId = verificationId;
@@ -274,13 +393,14 @@ class _LoginScreenState extends State<LoginScreen> {
             _isLoading = false;
           });
         },
-        codeAutoRetrievalTimeout: (verificationId) {
+        onError: (error) => _setError(_messageFor(error)),
+        onAutoRetrievalTimeout: (verificationId) {
           if (mounted) {
             setState(() => _verificationId = verificationId);
           }
         },
       );
-    } on FirebaseAuthException catch (error) {
+    } on AuthServiceException catch (error) {
       _setError(_messageFor(error));
     }
   }
@@ -302,12 +422,11 @@ class _LoginScreenState extends State<LoginScreen> {
     });
 
     try {
-      final credential = PhoneAuthProvider.credential(
-        verificationId: verificationId,
-        smsCode: _smsCodeController.text.trim(),
+      await widget.authService.verifyPhoneCode(
+        verificationId,
+        _smsCodeController.text.trim(),
       );
-      await FirebaseAuth.instance.signInWithCredential(credential);
-    } on FirebaseAuthException catch (error) {
+    } on AuthServiceException catch (error) {
       _setError(_messageFor(error));
     } finally {
       if (mounted) {
