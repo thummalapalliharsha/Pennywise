@@ -76,6 +76,7 @@ class PennywisePalette extends ThemeExtension<PennywisePalette> {
     'PG/Rent' => primary,
     'Transport' => secondary,
     'Shopping' => gradientStart,
+    'Investments' => income,
     'Entertainment/Movies' => gradientEnd,
     'Bills' || 'Bills & Recharge' => warning,
     'Personal Care' => gradientEnd,

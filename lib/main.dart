@@ -308,7 +308,17 @@ class _ExpenseDashboardState extends State<ExpenseDashboard> {
               onSelected: (value) => setSheetState(() {
                 category = value;
                 if (value != 'Transport') transportMode = 'Bus';
-                if (value != 'Shopping') subcategory = null;
+                if (value == 'Shopping') {
+                  if (!Expense.shoppingTypes.contains(subcategory)) {
+                    subcategory = Expense.shoppingTypes.first;
+                  }
+                } else if (value == 'Investments') {
+                  if (!Expense.investmentTypes.contains(subcategory)) {
+                    subcategory = Expense.investmentTypes.first;
+                  }
+                } else {
+                  subcategory = null;
+                }
               }),
             ),
             if (category == 'Transport') ...[
@@ -323,8 +333,17 @@ class _ExpenseDashboardState extends State<ExpenseDashboard> {
               const SizedBox(height: 12),
               _shoppingPicker(
                 selected: Expense.shoppingTypes.contains(subcategory)
-                    ? subcategory!
-                    : Expense.shoppingTypes.first,
+                    ? subcategory
+                    : null,
+                onSelected: (value) => setSheetState(() => subcategory = value),
+              ),
+            ],
+            if (category == 'Investments') ...[
+              const SizedBox(height: 12),
+              _investmentPicker(
+                selected: Expense.investmentTypes.contains(subcategory)
+                    ? subcategory
+                    : null,
                 onSelected: (value) => setSheetState(() => subcategory = value),
               ),
             ],
@@ -366,7 +385,9 @@ class _ExpenseDashboardState extends State<ExpenseDashboard> {
                 date: existing?.date ?? DateTime.now(),
                 paymentMethod: paymentMethod,
                 transportMode: category == 'Transport' ? transportMode : null,
-                subcategory: category == 'Shopping' ? subcategory : null,
+                subcategory: category == 'Shopping' || category == 'Investments'
+                    ? subcategory
+                    : null,
               );
               if (existing == null) {
                 await _repository.addExpense(userId, expense);
@@ -771,7 +792,7 @@ class _ExpenseDashboardState extends State<ExpenseDashboard> {
   }
 
   Widget _shoppingPicker({
-    required String selected,
+    required String? selected,
     required ValueChanged<String> onSelected,
   }) {
     const icons = {
@@ -800,6 +821,66 @@ class _ExpenseDashboardState extends State<ExpenseDashboard> {
           spacing: 8,
           runSpacing: 4,
           children: Expense.shoppingTypes.map((type) {
+            final isSelected = selected == type;
+            return ChoiceChip(
+              avatar: Icon(
+                icons[type],
+                size: 17,
+                color: isSelected ? Colors.white : palette.primary,
+              ),
+              label: Text(type),
+              selected: isSelected,
+              showCheckmark: false,
+              onSelected: (_) => onSelected(type),
+              selectedColor: palette.primary,
+              backgroundColor: palette.canvas,
+              labelStyle: TextStyle(
+                color: isSelected ? Colors.white : palette.text,
+                fontSize: 11,
+                fontWeight: FontWeight.w600,
+              ),
+              side: BorderSide(
+                color: isSelected ? palette.primary : palette.line,
+              ),
+            );
+          }).toList(),
+        ),
+      ],
+    );
+  }
+
+  Widget _investmentPicker({
+    required String? selected,
+    required ValueChanged<String> onSelected,
+  }) {
+    const icons = {
+      'SIP': Icons.savings_rounded,
+      'Stocks': Icons.show_chart_rounded,
+      'Mutual Funds': Icons.pie_chart_rounded,
+      'Gold': Icons.workspace_premium_rounded,
+      'ETFs': Icons.stacked_line_chart_rounded,
+      'Bonds': Icons.account_balance_rounded,
+      'Other Investments': Icons.trending_up_rounded,
+    };
+    final palette = PennywisePalette.of(context);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Padding(
+          padding: const EdgeInsets.only(left: 4, bottom: 8),
+          child: Text(
+            'Investment type',
+            style: TextStyle(
+              color: palette.muted,
+              fontSize: 13,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+        ),
+        Wrap(
+          spacing: 8,
+          runSpacing: 4,
+          children: Expense.investmentTypes.map((type) {
             final isSelected = selected == type;
             return ChoiceChip(
               avatar: Icon(
@@ -2500,6 +2581,7 @@ class _EditorSheetState extends State<_EditorSheet> {
       if (_selectedKind != TransactionHistoryKind.moneyIn) ...[
         ...Expense.transportModes.map((mode) => 'Transport · $mode'),
         ...Expense.shoppingTypes.map((type) => 'Shopping · $type'),
+        ...Expense.investmentTypes.map((type) => 'Investments · $type'),
       ],
       if (_selectedKind == TransactionHistoryKind.all) 'Money In',
     ];

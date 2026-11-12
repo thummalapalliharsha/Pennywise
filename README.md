@@ -10,8 +10,8 @@ user's financial records under their own Firebase UID.
 - Record money received and expenses, with UPI, cash, and card payment methods.
 - Review available balance, daily/weekly/monthly spending, budgets, and savings
   goal progress.
-- Organize expenses by category, including Shopping subcategories and Transport
-  modes.
+- Organize expenses by category, including Shopping and Investments
+  subcategories and Transport modes.
 - Search and filter transaction history; edit or delete income and expenses.
 - Review spending by category and compare monthly totals and category spending.
 - Export a selected month's transactions and summary to CSV or Excel, then share

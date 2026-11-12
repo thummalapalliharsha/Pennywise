@@ -18,6 +18,7 @@ service cloud.firestore {
         && data.title.size() <= 120
         && data.category in [
           'Food', 'PG/Rent', 'Transport', 'Shopping',
+          'Investments',
           'Entertainment/Movies', 'Bills & Recharge', 'Bills',
           'Personal Care', 'Health', 'Education', 'Social & Outings',
           'Travel', 'Others'
@@ -36,6 +37,11 @@ service cloud.firestore {
             && data.subcategory in [
               'General Shopping', 'Clothes & Footwear', 'Electronics',
               'Accessories', 'Household Items'
+            ])
+          || (data.category == 'Investments'
+            && data.subcategory in [
+              'SIP', 'Stocks', 'Mutual Funds', 'Gold', 'ETFs', 'Bonds',
+              'Other Investments'
             ]))
         && (!data.keys().hasAny(['recurringScheduleId'])
           || (data.recurringScheduleId is string

@@ -7,6 +7,7 @@ class Expense {
     'PG/Rent',
     'Transport',
     'Shopping',
+    'Investments',
     'Entertainment/Movies',
     'Bills & Recharge',
     'Personal Care',
@@ -24,6 +25,15 @@ class Expense {
     'Electronics',
     'Accessories',
     'Household Items',
+  ];
+  static const investmentTypes = [
+    'SIP',
+    'Stocks',
+    'Mutual Funds',
+    'Gold',
+    'ETFs',
+    'Bonds',
+    'Other Investments',
   ];
 
   const Expense({
@@ -67,6 +77,7 @@ class Expense {
       'Household Items' => Icons.chair_alt_rounded,
       _ => Icons.shopping_bag_rounded,
     },
+    'Investments' => Icons.trending_up_rounded,
     'Entertainment/Movies' => Icons.movie_rounded,
     'Bills' || 'Bills & Recharge' => Icons.receipt_long_rounded,
     'Personal Care' => Icons.spa_rounded,
